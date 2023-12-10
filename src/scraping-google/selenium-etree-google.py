@@ -12,6 +12,7 @@ import pandas as pd
 import logging
 
 rating_pattern = r'\w*(\d,*\d) \w* (\d)(,)|(\d,*\d)'
+comment_pattern = r'<br><br>'
 
 
 def collect_comments_selenium(driver, data):
@@ -69,7 +70,7 @@ def collect_comments_selenium(driver, data):
                     text_comment = text_comment_box.text if text_comment_box.text else text_comment_box.get_attribute(
                         'innerHTML')
                     pass
-
+            text_comment = re.sub(comment_pattern, r' ', text_comment)
         except NoSuchElementException:
             pass
 
@@ -156,6 +157,8 @@ def collect_comments_html(url, data):
                     text_comment = text_comment_full.text
                 except:
                     text_comment = text_comment_box.text
+
+                text_comment = re.sub(comment_pattern, r' ', text_comment)
             except:
                 pass
 
