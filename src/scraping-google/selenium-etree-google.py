@@ -11,8 +11,10 @@ import re
 import pandas as pd
 import logging
 
+rating_pattern = r'\w*(\d,*\d) \w* (\d)(,)|(\d,*\d)'
 
-def collect_comments_selenium(driver):
+
+def collect_comments_selenium(driver, data):
     logging.info(f"Extract comments data using selenium")
 
     comments = driver.find_elements(
@@ -20,16 +22,24 @@ def collect_comments_selenium(driver):
 
     logging.info(f"Number of WebElements (comments div) found {len(comments)}")
 
-    names_ = []
-    comments_ = []
-    dates_ = []
-
     for comment in comments:
         name = ""
         try:
             name = comment.find_element(
                 by=By.XPATH, value='.//div[@class="TSUbDb"]//a').text
         except NoSuchElementException:
+            pass
+
+        rating = ""
+        rating_scale = ""
+        try:
+            rating_str = comment.find_element(
+                by=By.XPATH, value='.//span[contains(@aria-label, "Classificado como")]').get_attribute('aria-label')
+            rating_match = re.search(rating_pattern, rating_str)
+            rating = rating_match.group(1)
+            rating_scale = rating_match.group(2)
+        except Exception as error:
+            logging.error(error)
             pass
 
         text_comment = ""
@@ -74,11 +84,11 @@ def collect_comments_selenium(driver):
         except NoSuchElementException:
             pass
 
-        names_.append(name)
-        comments_.append(text_comment)
-        dates_.append(date)
-
-    return (names_, comments_, dates_)
+        data["name"].append(name)
+        data["rating"].append(rating)
+        data["rating_scale"].append(rating_scale)
+        data["comment"].append(text_comment)
+        data["date"].append(date)
 
 
 def get_site_content(url):
@@ -97,7 +107,7 @@ def collect_comments_html(url, data):
         logging.info(f"Getting html site content of url {url}")
         html = get_site_content(url)
 
-        dom = etree.HTML(str(html))
+        dom = etree.HTML(html.decode('utf-8'))
 
         logging.info(f"Extract next-page-token")
 
@@ -121,6 +131,21 @@ def collect_comments_html(url, data):
             except:
                 pass
 
+            rating = ""
+            rating_scale = ""
+            try:
+                rating_attrs = comment.xpath(
+                    './/span[contains(@aria-label, "Classificado como")]')[0].items()
+                rating_aria_label_tuple = rating_attrs[1]
+                rating_aria_label_value = rating_aria_label_tuple[1]
+                rating_match = re.search(
+                    rating_pattern, rating_aria_label_value)
+                rating = rating_match.group(1)
+                rating_scale = rating_match.group(2)
+            except Exception as error:
+                logging.error(error)
+                pass
+
             text_comment = ""
             try:
                 text_comment_box = comment.xpath(
@@ -138,13 +163,15 @@ def collect_comments_html(url, data):
             try:
                 dates = comment.xpath('.//span[contains(@class, "lTi8oc")]')
                 for aux_date in dates:
-                    if aux_date.text != "":
+                    if aux_date.text:
                         date = aux_date.text
                         break
             except:
                 pass
 
             data["name"].append(name)
+            data["rating"].append(rating)
+            data["rating_scale"].append(rating_scale)
             data["comment"].append(text_comment)
             data["date"].append(date)
 
@@ -161,18 +188,19 @@ def get_remain_comments(base_request, data, urls):
 
         base_req_url = base_request.url
 
-        urls["urls"].append(base_req_url.encode())
+        urls["urls"].append(base_req_url)
 
         pattern = r'(next_page_token:)([a-zA-Z0-9%$#()-+=!@@!]+)(,)'
 
         next_page_token = collect_comments_html(base_request.url, data)
+
         while next_page_token:
             logging.info(f"Next-page-token {next_page_token}")
             url = re.sub(pattern, rf"\1{next_page_token}\3", base_req_url, 1)
 
             next_page_token = collect_comments_html(url, data)
 
-            urls["urls"].append(url.encode())
+            urls["urls"].append(url)
 
     except Exception as error:
         print(error)
@@ -217,13 +245,15 @@ def scrape():
         modal = WebDriverWait(driver, 10).until(expected_conditions.presence_of_element_located(
             (By.XPATH, '//div[@class="review-dialog-list"]')))
 
-        names, comments, dates = collect_comments_selenium(driver)
-
         data = {
-            "name": names,
-            "comment": comments,
-            "date": dates,
+            "name": [],
+            "rating": [],
+            "rating_scale": [],
+            "comment": [],
+            "date": [],
         }
+
+        collect_comments_selenium(driver, data)
 
         urls = {"urls": []}
 
