@@ -4,7 +4,7 @@ from selenium.webdriver.support import expected_conditions
 from selenium.common.exceptions import NoSuchElementException
 from seleniumwire import webdriver
 from lxml import etree
-from time import sleep
+from time import sleep, time
 # import pickle
 import requests
 import re
@@ -263,4 +263,8 @@ def scrape():
     data_frame.to_csv('data.csv')
 
 
+start_time = time()
 scrape()
+end_time = time()
+
+logging.info(f"Runtime: {end_time - start_time}")
