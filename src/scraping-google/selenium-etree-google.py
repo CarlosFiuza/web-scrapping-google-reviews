@@ -4,7 +4,7 @@ from selenium.webdriver.support import expected_conditions
 from selenium.common.exceptions import NoSuchElementException
 from seleniumwire import webdriver
 from lxml import etree
-from time import sleep, time
+from time import time
 # import pickle
 import requests
 import re
@@ -36,12 +36,30 @@ def collect_comments_selenium(driver):
         try:
             text_comment_box = comment.find_element(
                 by=By.XPATH, value='.//span[@data-expandable-section=""]')
+            text_comment_full = None
             try:
                 text_comment_full = text_comment_box.find_element(
                     by=By.XPATH, value='.//span[@class="review-full-text"]')
-                text_comment = text_comment_full.text
             except NoSuchElementException:
-                text_comment = text_comment_box.text
+                pass
+
+            if text_comment_full:
+                text_comment = text_comment_full.text if text_comment_full.text else text_comment_full.get_attribute(
+                    'innerHTML')
+            else:
+                try:
+                    comment.find_element(
+                        by=By.XPATH, value='.//a[@class="review-more-link"]').click()
+                    text_comment_full = text_comment_box.find_element(
+                        by=By.XPATH, value='.//span[@class="review-full-text"]')
+
+                    text_comment = text_comment_full.text if text_comment_full.text else text_comment_full.get_attribute(
+                        'innerHTML')
+                except NoSuchElementException:
+                    text_comment = text_comment_box.text if text_comment_box.text else text_comment_box.get_attribute(
+                        'innerHTML')
+                    pass
+
         except NoSuchElementException:
             pass
 
@@ -50,7 +68,7 @@ def collect_comments_selenium(driver):
             dates = comment.find_elements(
                 by=By.XPATH, value='.//span[contains(@class, "lTi8oc")]')
             for aux_date in dates:
-                if aux_date.text != "":
+                if aux_date.text:
                     date = aux_date.text
                     break
         except NoSuchElementException:
@@ -137,11 +155,14 @@ def collect_comments_html(url, data):
         return next_page_token
 
 
-def get_remain_comments(base_request, data):
+def get_remain_comments(base_request, data, urls):
     try:
         logging.info(f"Init function to get remain comments")
 
         base_req_url = base_request.url
+
+        urls["urls"].append(base_req_url.encode())
+
         pattern = r'(next_page_token:)([a-zA-Z0-9%$#()-+=!@@!]+)(,)'
 
         next_page_token = collect_comments_html(base_request.url, data)
@@ -150,6 +171,8 @@ def get_remain_comments(base_request, data):
             url = re.sub(pattern, rf"\1{next_page_token}\3", base_req_url, 1)
 
             next_page_token = collect_comments_html(url, data)
+
+            urls["urls"].append(url.encode())
 
     except Exception as error:
         print(error)
@@ -194,8 +217,6 @@ def scrape():
         modal = WebDriverWait(driver, 10).until(expected_conditions.presence_of_element_located(
             (By.XPATH, '//div[@class="review-dialog-list"]')))
 
-        sleep(5)
-
         names, comments, dates = collect_comments_selenium(driver)
 
         data = {
@@ -203,6 +224,8 @@ def scrape():
             "comment": comments,
             "date": dates,
         }
+
+        urls = {"urls": []}
 
         try:
             logging.info(f"Looking for next-page-token in html")
@@ -218,10 +241,13 @@ def scrape():
                 driver.execute_script(
                     "arguments[0].scrollTop = arguments[0].scrollHeight", modal)
 
-                sleep(5)
+                WebDriverWait(driver, 10).until(lambda d: len(d.find_elements(
+                    by=By.XPATH, value='//div[@jscontroller="fIQYlf"]')) > 5)
 
                 logging.info(
                     f"Filtering browser requests to find request with reviewSort param")
+
+                driver.wait_for_request(r'(.*)/reviewSort\?')
 
                 review_sort = list(
                     filter(lambda c: c.url.find("reviewSort?") != -1, driver.requests))
@@ -238,7 +264,7 @@ def scrape():
                 # with open("all_requests.py", "wb") as f:
                 #     pickle.dump(review_sort, f)
 
-                get_remain_comments(review_sort_request, data)
+                get_remain_comments(review_sort_request, data, urls)
 
             else:
                 logging.info(f"Closing selenium webdriver")
@@ -261,6 +287,12 @@ def scrape():
     logging.info(f"Number of comments extracted: {len(data_frame)}")
 
     data_frame.to_csv('data.csv')
+
+    url_frame = pd.DataFrame(urls)
+
+    logging.info(f"Number of urls extracted: {len(url_frame)}")
+
+    url_frame.to_csv('urls.csv')
 
 
 start_time = time()
