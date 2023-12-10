@@ -10,9 +10,46 @@ import requests
 import re
 import pandas as pd
 import logging
+import datetime
 
 rating_pattern = r'\w*(\d,*\d) \w* (\d)(,)|(\d,*\d)'
 comment_pattern = r'<br><br>'
+date_pattern = r'(\d+|um|uma) (\w+) (atrás)'
+
+period_dict = {
+    "anos": "years",
+    "ano": "year",
+    "meses": "months",
+    "mês": "month",
+    "semanas": "weeks",
+    "semana": "week",
+    "dias": "days",
+    "dia": "day",
+    "minutos": "minutes",
+    "minuto": "minute",
+    "segundos": "seconds",
+    "segundo": "second"
+}
+
+now = str(datetime.datetime.now())
+
+
+def get_int(str):
+    if str == "um" or str == "uma":
+        return 1
+    return int(str)
+
+
+def get_computed_sql_date(date_str):
+    if not date_str or date_str == "":
+        return ""
+    try:
+        re_match = re.search(date_pattern, date_str)
+        num_period = get_int(re_match.group(1))
+        period = period_dict[re_match.group(2)]
+        return f"'{now}' - INTERVAL '{num_period} {period}'"
+    except:
+        return ""
 
 
 def collect_comments_selenium(driver, data):
@@ -90,6 +127,7 @@ def collect_comments_selenium(driver, data):
         data["rating_scale"].append(rating_scale)
         data["comment"].append(text_comment)
         data["date"].append(date)
+        data["sql_date"].append(get_computed_sql_date(date))
 
 
 def get_site_content(url):
@@ -177,6 +215,7 @@ def collect_comments_html(url, data):
             data["rating_scale"].append(rating_scale)
             data["comment"].append(text_comment)
             data["date"].append(date)
+            data["sql_date"].append(get_computed_sql_date(date))
 
         return next_page_token
 
@@ -254,6 +293,7 @@ def scrape():
             "rating_scale": [],
             "comment": [],
             "date": [],
+            "sql_date": [],
         }
 
         collect_comments_selenium(driver, data)
