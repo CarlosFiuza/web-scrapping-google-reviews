@@ -8,30 +8,36 @@ from time import time
 # import pickle
 import requests
 import re
-import pandas as pd
+# import pandas as pd
 import logging
-import datetime
+from datetime import datetime
+from dateutil.relativedelta import relativedelta
+from db.create import database_instance
+from db.review_model import ReviewModel
 
 rating_pattern = r'\w*(\d,*\d) \w* (\d)(,)|(\d,*\d)'
 comment_pattern = r'<br><br>'
 date_pattern = r'(\d+|um|uma) (\w+) (atrás)'
+comma_pattern = r'(\d+)(,)(\d+)'
 
 period_dict = {
     "anos": "years",
-    "ano": "year",
+    "ano": "years",
     "meses": "months",
-    "mês": "month",
+    "mês": "months",
     "semanas": "weeks",
-    "semana": "week",
+    "semana": "weeks",
     "dias": "days",
-    "dia": "day",
+    "dia": "days",
+    "hora": "hours",
+    "horas": "hours",
     "minutos": "minutes",
-    "minuto": "minute",
+    "minuto": "minutes",
     "segundos": "seconds",
-    "segundo": "second"
+    "segundo": "seconds"
 }
 
-now = str(datetime.datetime.now())
+now = datetime.now()
 
 
 def get_int(str):
@@ -40,19 +46,36 @@ def get_int(str):
     return int(str)
 
 
-def get_computed_sql_date(date_str):
+def get_computed_date(date_str):
     if not date_str or date_str == "":
         return ""
     try:
         re_match = re.search(date_pattern, date_str)
         num_period = get_int(re_match.group(1))
         period = period_dict[re_match.group(2)]
-        return f"'{now}' - INTERVAL '{num_period} {period}'"
+
+        seconds = num_period if period == "seconds" else 0
+        minutes = num_period if period == "minutes" else 0
+        hours = num_period if period == "hours" else 0
+        days = num_period if period == "days" else 0
+        weeks = num_period if period == "weeks" else 0
+        months = num_period if period == "months" else 0
+        years = num_period if period == "years" else 0
+
+        return str(now - relativedelta(seconds=seconds, minutes=minutes, hours=hours, days=days, weeks=weeks, months=months, years=years))
+
     except:
         return ""
 
 
-def collect_comments_selenium(driver, data):
+def replace_comma_with_dot(string):
+    try:
+        return float(re.sub(comma_pattern, r'\1.\3', string))
+    except:
+        return 0
+
+
+def collect_comments_selenium(driver, reviews):
     logging.info(f"Extract comments data using selenium")
 
     comments = driver.find_elements(
@@ -122,12 +145,19 @@ def collect_comments_selenium(driver, data):
         except NoSuchElementException:
             pass
 
-        data["name"].append(name)
-        data["rating"].append(rating)
-        data["rating_scale"].append(rating_scale)
-        data["comment"].append(text_comment)
-        data["date"].append(date)
-        data["sql_date"].append(get_computed_sql_date(date))
+        reviews.append(ReviewModel(
+            author=name,
+            comment=text_comment,
+            rating=replace_comma_with_dot(rating),
+            rating_scale=rating_scale,
+            estimated_date=get_computed_date(date)
+        ))
+        # data["name"].append(name)
+        # data["rating"].append(rating)
+        # data["rating_scale"].append(rating_scale)
+        # data["comment"].append(text_comment)
+        # data["date"].append(date)
+        # data["sql_date"].append(get_computed_date(date))
 
 
 def get_site_content(url):
@@ -140,7 +170,7 @@ def get_site_content(url):
     return site.content
 
 
-def collect_comments_html(url, data):
+def collect_comments_html(url, reviews):
     next_page_token = None
     try:
         logging.info(f"Getting html site content of url {url}")
@@ -210,12 +240,20 @@ def collect_comments_html(url, data):
             except:
                 pass
 
-            data["name"].append(name)
-            data["rating"].append(rating)
-            data["rating_scale"].append(rating_scale)
-            data["comment"].append(text_comment)
-            data["date"].append(date)
-            data["sql_date"].append(get_computed_sql_date(date))
+            reviews.append(ReviewModel(
+                author=name,
+                comment=text_comment,
+                rating=replace_comma_with_dot(rating),
+                rating_scale=rating_scale,
+                estimated_date=get_computed_date(date)
+            ))
+
+            # data["name"].append(name)
+            # data["rating"].append(rating)
+            # data["rating_scale"].append(rating_scale)
+            # data["comment"].append(text_comment)
+            # data["date"].append(date)
+            # data["sql_date"].append(get_computed_date(date))
 
         return next_page_token
 
@@ -224,7 +262,7 @@ def collect_comments_html(url, data):
         return next_page_token
 
 
-def get_remain_comments(base_request, data, urls):
+def get_remain_comments(base_request, reviews, urls):
     try:
         logging.info(f"Init function to get remain comments")
 
@@ -234,13 +272,13 @@ def get_remain_comments(base_request, data, urls):
 
         pattern = r'(next_page_token:)([a-zA-Z0-9%$#()-+=!@@!]+)(,)'
 
-        next_page_token = collect_comments_html(base_request.url, data)
+        next_page_token = collect_comments_html(base_request.url, reviews)
 
         while next_page_token:
             logging.info(f"Next-page-token {next_page_token}")
             url = re.sub(pattern, rf"\1{next_page_token}\3", base_req_url, 1)
 
-            next_page_token = collect_comments_html(url, data)
+            next_page_token = collect_comments_html(url, reviews)
 
             urls["urls"].append(url)
 
@@ -287,16 +325,18 @@ def scrape():
         modal = WebDriverWait(driver, 10).until(expected_conditions.presence_of_element_located(
             (By.XPATH, '//div[@class="review-dialog-list"]')))
 
-        data = {
-            "name": [],
-            "rating": [],
-            "rating_scale": [],
-            "comment": [],
-            "date": [],
-            "sql_date": [],
-        }
+        reviews = []
 
-        collect_comments_selenium(driver, data)
+        # data = {
+        #     "name": [],
+        #     "rating": [],
+        #     "rating_scale": [],
+        #     "comment": [],
+        #     "date": [],
+        #     "sql_date": [],
+        # }
+
+        collect_comments_selenium(driver, reviews)
 
         urls = {"urls": []}
 
@@ -337,7 +377,7 @@ def scrape():
                 # with open("all_requests.py", "wb") as f:
                 #     pickle.dump(review_sort, f)
 
-                get_remain_comments(review_sort_request, data, urls)
+                get_remain_comments(review_sort_request, reviews, urls)
 
             else:
                 logging.info(f"Closing selenium webdriver")
@@ -355,17 +395,32 @@ def scrape():
     except:
         pass
 
-    data_frame = pd.DataFrame(data)
+    # data_frame = pd.DataFrame(data)
 
-    logging.info(f"Number of comments extracted: {len(data_frame)}")
+    # logging.info(f"Number of comments extracted: {len(data_frame)}")
 
-    data_frame.to_csv('data.csv')
+    # data_frame.to_csv('data.csv')
 
-    url_frame = pd.DataFrame(urls)
+    # url_frame = pd.DataFrame(urls)
 
-    logging.info(f"Number of urls extracted: {len(url_frame)}")
+    # logging.info(f"Number of urls extracted: {len(url_frame)}")
 
-    url_frame.to_csv('urls.csv')
+    # url_frame.to_csv('urls.csv')
+
+    try:
+        logging.info(f"Connecting with database")
+        database = database_instance()
+        database.connect()
+        logging.info(f"Bulk data")
+
+        with database.atomic():
+            ReviewModel.bulk_create(reviews, batch_size=100)
+
+        logging.info(f"Closing connection with database")
+        database.close()
+    except Exception as error:
+        logging.error(f"Failed to connect with database {error}")
+        exit(0)
 
 
 start_time = time()
