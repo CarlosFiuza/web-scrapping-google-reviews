@@ -11,8 +11,8 @@ import re
 import logging
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
-from .create_database import database_instance
-from .models import ReviewModel, StoreModel
+from src.create_database import database_instance
+from src.models import ReviewModel, StoreModel
 from sqlalchemy.orm import sessionmaker
 from math import ceil
 
@@ -39,6 +39,10 @@ period_dict = {
 }
 
 now = datetime.now()
+
+# logging.basicConfig(level=logging.INFO,
+#                     format="%(asctime)s - %(levelname)s - %(message)s")
+# logger = logging.getLogger()
 
 
 def get_int(str):
@@ -77,12 +81,13 @@ def replace_comma_with_dot(string):
 
 
 def collect_comments_selenium(driver, reviews, store_id):
-    logging.info(f"Extract comments data using selenium")
+    print(f"{datetime.now()} [INFO] = Extract comments data using selenium")
 
     comments = driver.find_elements(
         by=By.XPATH, value='//div[@jscontroller="fIQYlf"]')
 
-    logging.info(f"Number of WebElements (comments div) found {len(comments)}")
+    print(
+        f"{datetime.now()} [INFO] = Number of WebElements (comments div) found {len(comments)}")
 
     for comment in comments:
         name = ""
@@ -101,7 +106,7 @@ def collect_comments_selenium(driver, reviews, store_id):
             rating = rating_match.group(1)
             rating_scale = rating_match.group(2)
         except Exception as error:
-            logging.error(error)
+            print(f"{datetime.now()} [ERROR] = {error}")
             pass
 
         text_comment = ""
@@ -169,12 +174,13 @@ def get_site_content(url):
 def collect_comments_html(url, reviews, store_id):
     next_page_token = None
     try:
-        logging.info(f"Getting html site content of url {url}")
+        print(
+            f"{datetime.now()} [INFO] = Getting html site content of url {url}")
         html = get_site_content(url)
 
         dom = etree.HTML(html.decode('utf-8'))
 
-        logging.info(f"Extract next-page-token")
+        print(f"{datetime.now()} [INFO] = Extract next-page-token")
 
         try:
             next_page_token = dom.xpath(
@@ -182,12 +188,13 @@ def collect_comments_html(url, reviews, store_id):
         except:
             pass
 
-        logging.info(f"Extract comments data using dom.xpath")
+        print(
+            f"{datetime.now()} [INFO] = Extract comments data using dom.xpath")
 
         comments = dom.xpath("//div[@jscontroller='fIQYlf']")
 
-        logging.info(
-            f"Number of WebElements (comments div) found {len(comments)}")
+        print(
+            f"{datetime.now()} [INFO] = Number of WebElements (comments div) found {len(comments)}")
 
         for comment in comments:
             name = ""
@@ -208,7 +215,7 @@ def collect_comments_html(url, reviews, store_id):
                 rating = rating_match.group(1)
                 rating_scale = rating_match.group(2)
             except Exception as error:
-                logging.error(error)
+                print(f"{datetime.now()} [ERROR] = {error}")
                 pass
 
             text_comment = ""
@@ -248,13 +255,15 @@ def collect_comments_html(url, reviews, store_id):
         return next_page_token
 
     except Exception as error:
-        logging.error(f"Failed to collect comments with html: {error}")
+        print(
+            f"{datetime.now()} [ERROR] = Failed to collect comments with html: {error}")
         return next_page_token
 
 
 def get_remain_comments(base_request, reviews, store_id):
     try:
-        logging.info(f"Init function to get remain comments")
+        print(
+            f"{datetime.now()} [INFO] = Init function to get remain comments")
 
         base_req_url = base_request.url
 
@@ -264,43 +273,47 @@ def get_remain_comments(base_request, reviews, store_id):
             base_request.url, reviews, store_id)
 
         while next_page_token:
-            logging.info(f"Next-page-token {next_page_token}")
+            print(
+                f"{datetime.now()} [INFO] = Next-page-token {next_page_token}")
             url = re.sub(pattern, rf"\1{next_page_token}\3", base_req_url, 1)
 
             next_page_token = collect_comments_html(url, reviews, store_id)
 
     except Exception as error:
-        logging.error(error)
+        print(f"{datetime.now()} [ERROR] = {error}")
         pass
 
 
 def get_store(store_id, database):
     try:
-        logging.info(f"Connecting with database")
+        print(f"{datetime.now()} [INFO] = Connecting with database")
         Session = sessionmaker(bind=database)
         session = Session()
         store = None
         try:
-            logging.info(f"Getting store info by id {store_id}")
+            print(
+                f"{datetime.now()} [INFO] = Getting store info by id {store_id}")
             store = StoreModel.get_one(db_session=session, id=store_id)
         except Exception as error:
             raise Exception(f"Store with id {store_id} does not exists")
         finally:
-            logging.info(f"Closing connection with database")
+            print(
+                f"{datetime.now()} [INFO] = Closing connection with database")
             session.close()
             return store
 
     except Exception as error:
-        logging.error(f"Failed to retrieve store search string: {error}")
+        print(
+            f"{datetime.now()} [ERROR] = Failed to retrieve store search string: {error}")
         raise error
 
 
 def bulk_insert_reviews(reviews, database):
     try:
-        logging.info(f"Connecting with database")
+        print(f"{datetime.now()} [INFO] = Connecting with database")
         Session = sessionmaker(bind=database)
         session = Session()
-        logging.info(f"Bulk data")
+        print(f"{datetime.now()} [INFO] = Bulk data")
         try:
             num_reviews = len(reviews)
             batch_size = 100
@@ -311,7 +324,8 @@ def bulk_insert_reviews(reviews, database):
                     reviews[actual_batch - batch_size:actual_batch])
                 session.commit()
         except Exception as error:
-            logging.info(f"Closing connection with database")
+            print(
+                f"{datetime.now()} [INFO] = Closing connection with database")
             session.close()
             raise Exception("Failed to bulk insert reviews")
 
@@ -321,11 +335,8 @@ def bulk_insert_reviews(reviews, database):
 
 def scrape_handler(event, context):
     try:
-        logging.basicConfig(level=logging.INFO,
-                            format="%(asctime)s - %(levelname)s - %(message)s")
-
         if not "store_id" in event:
-            logging.error(f"Missing key store_id in event")
+            print(f"{datetime.now()} [ERROR] = Missing key store_id in event")
             exit(1)
 
         store_id = event["store_id"]
@@ -341,43 +352,54 @@ def scrape_handler(event, context):
         url = "https://www.google.com.br/"
 
         options = webdriver.ChromeOptions()
+        options.binary_location = '/opt/chrome/chrome'
         options.add_argument("--headless")
-        options.binary_location = '/opt/headless-chromium'
-        options.add_argument('--no-sandbox')
-        options.add_argument('--start-maximized')
-        options.add_argument('--start-fullscreen')
-        options.add_argument('--single-process')
-        options.add_argument('--disable-dev-shm-usage')
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-gpu")
+        options.add_argument("--disable-dev-tools")
+        options.add_argument("--no-zygote")
+        options.add_argument("--single-process")
+        options.add_argument("--window-size=2560x1440")
+        options.add_argument("--user-data-dir=/tmp/chrome-user-data")
+        options.add_argument("--remote-debugging-port=9222")
+        options.headless = True
+        selenium_options = {
+            'request_storage_base_dir': '/tmp',  # Use /tmp to store captured data
+            'exclude_hosts': ''
+        }
         service = Service(
             executable_path="/opt/chromedriver")
 
         selenium_logger = logging.getLogger('seleniumwire')
         selenium_logger.setLevel(logging.ERROR)
 
-        driver = webdriver.Chrome(service=service, options=options)
+        driver = webdriver.Chrome(
+            service=service, options=options, seleniumwire_options=selenium_options)
 
-        logging.info(f"Loads google web site")
+        print(f"{datetime.now()} [INFO] = Loads google web site")
 
         driver.get(url)
 
         search_input = driver.find_element(
             by=By.XPATH, value='//textarea[@title="Pesquisar"]')
 
-        search_input = WebDriverWait(driver, 10).until(expected_conditions.presence_of_element_located(
+        search_input = WebDriverWait(driver, 30).until(expected_conditions.presence_of_element_located(
             (By.XPATH, '//textarea[@title="Pesquisar"]')))
 
-        logging.info(f"Search for {search_string}")
+        print(f"{datetime.now()} [INFO] = Search for {search_string}")
 
         search_input.send_keys(search_string)
 
         search_input.submit()
 
-        logging.info(f"Clicking in button to see more reviews")
+        print(
+            f"{datetime.now()} [INFO] = Clicking in button to see more reviews")
 
-        WebDriverWait(driver, 10).until(expected_conditions.element_to_be_clickable(
+        WebDriverWait(driver, 30).until(expected_conditions.element_to_be_clickable(
             (By.XPATH, '//a[@data-async-trigger="reviewDialog"]'))).click()
 
-        modal = WebDriverWait(driver, 10).until(expected_conditions.presence_of_element_located(
+        modal = WebDriverWait(driver, 30).until(expected_conditions.presence_of_element_located(
             (By.XPATH, '//div[@class="review-dialog-list"]')))
 
         reviews = []
@@ -385,31 +407,34 @@ def scrape_handler(event, context):
         collect_comments_selenium(driver, reviews, store.id)
 
         try:
-            logging.info(f"Looking for next-page-token in html")
+            print(
+                f"{datetime.now()} [INFO] = Looking for next-page-token in html")
 
             next_page_token = driver.find_element(
                 by=By.XPATH, value='.//div[contains(@class, "reviews-block")]').get_attribute("data-next-page-token")
 
             if next_page_token and next_page_token != "":
-                logging.info(f"next-page-token founded {next_page_token}")
+                print(
+                    f"{datetime.now()} [INFO] = next-page-token founded {next_page_token}")
 
-                logging.info(f"Scrooling to dispatch desirable request")
+                print(
+                    f"{datetime.now()} [INFO] = Scrooling to dispatch desirable request")
 
                 driver.execute_script(
                     "arguments[0].scrollTop = arguments[0].scrollHeight", modal)
 
-                WebDriverWait(driver, 10).until(lambda d: len(d.find_elements(
+                WebDriverWait(driver, 30).until(lambda d: len(d.find_elements(
                     by=By.XPATH, value='//div[@jscontroller="fIQYlf"]')) > 5)
 
-                logging.info(
-                    f"Filtering browser requests to find request with reviewSort param")
+                print(
+                    f"{datetime.now()} [INFO] = Filtering browser requests to find request with reviewSort param")
 
                 driver.wait_for_request(r'(.*)/reviewSort\?')
 
                 review_sort = list(
                     filter(lambda c: c.url.find("reviewSort?") != -1, driver.requests))
 
-                logging.info(f"Closing selenium webdriver")
+                print(f"{datetime.now()} [INFO] = Closing selenium webdriver")
 
                 driver.close()
 
@@ -419,12 +444,13 @@ def scrape_handler(event, context):
                                     reviews, store_id)
 
             else:
-                logging.info(f"Closing selenium webdriver")
+                print(f"{datetime.now()} [INFO] = Closing selenium webdriver")
 
                 driver.close()
 
         except Exception as error:
-            logging.error(f"Failed in look for desirable request: {error}")
+            print(
+                f"{datetime.now()} [ERROR] = Failed in look for desirable request: {error}")
 
         try:
             driver.close()
@@ -435,10 +461,11 @@ def scrape_handler(event, context):
 
         end_time = time()
 
-        logging.info(f"Runtime: {end_time - start_time}")
+        print(f"{datetime.now()} [INFO] = Runtime: {end_time - start_time}")
 
     except Exception as error:
-        logging.error(f"Failed in main function scrape: {error}")
+        print(
+            f"{datetime.now()} [ERROR] = Failed in main function scrape: {error}")
 
 
 # event = {"store_id": 1}
