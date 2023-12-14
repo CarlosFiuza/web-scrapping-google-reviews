@@ -80,7 +80,7 @@ def replace_comma_with_dot(string):
         return 0
 
 
-def collect_comments_selenium(driver, reviews, store_id):
+def collect_comments_selenium(driver, store_id):
     print(f"{datetime.now()} [INFO] = Extract comments data using selenium")
 
     comments = driver.find_elements(
@@ -88,6 +88,8 @@ def collect_comments_selenium(driver, reviews, store_id):
 
     print(
         f"{datetime.now()} [INFO] = Number of WebElements (comments div) found {len(comments)}")
+
+    reviews = []
 
     for comment in comments:
         name = ""
@@ -160,6 +162,8 @@ def collect_comments_selenium(driver, reviews, store_id):
             estimated_date=get_computed_date(date)
         ))
 
+    return reviews
+
 
 def get_site_content(url):
     headers = ({
@@ -171,11 +175,12 @@ def get_site_content(url):
     return site.content
 
 
-def collect_comments_html(url, reviews, store_id):
+def collect_comments_html(url, store_id):
     next_page_token = None
+    reviews = []
     try:
         print(
-            f"{datetime.now()} [INFO] = Getting html site content of url {url}")
+            f"{datetime.now()} [INFO] = Getting html site content")
         html = get_site_content(url)
 
         dom = etree.HTML(html.decode('utf-8'))
@@ -252,7 +257,7 @@ def collect_comments_html(url, reviews, store_id):
                 estimated_date=get_computed_date(date)
             ))
 
-        return next_page_token
+        return (next_page_token, reviews)
 
     except Exception as error:
         print(
@@ -260,7 +265,7 @@ def collect_comments_html(url, reviews, store_id):
         return next_page_token
 
 
-def get_remain_comments(base_request, reviews, store_id):
+def get_remain_comments(base_request, store_id, database):
     try:
         print(
             f"{datetime.now()} [INFO] = Init function to get remain comments")
@@ -269,15 +274,28 @@ def get_remain_comments(base_request, reviews, store_id):
 
         pattern = r'(next_page_token:)([a-zA-Z0-9%$#()-+=!@@!]+)(,)'
 
-        next_page_token = collect_comments_html(
-            base_request.url, reviews, store_id)
+        next_page_token, reviews = collect_comments_html(
+            base_request.url, store_id)
+
+        bulk_insert_reviews(reviews, database)
+
+        reviews = []
 
         while next_page_token:
             print(
                 f"{datetime.now()} [INFO] = Next-page-token {next_page_token}")
             url = re.sub(pattern, rf"\1{next_page_token}\3", base_req_url, 1)
 
-            next_page_token = collect_comments_html(url, reviews, store_id)
+            next_page_token, reviews_aux = collect_comments_html(url, store_id)
+
+            reviews = reviews + reviews_aux
+
+            if len(reviews) > 99:
+                bulk_insert_reviews(reviews, database)
+                reviews = []
+
+        if len(reviews) > 0:
+            bulk_insert_reviews(reviews, database)
 
     except Exception as error:
         print(f"{datetime.now()} [ERROR] = {error}")
@@ -328,9 +346,25 @@ def bulk_insert_reviews(reviews, database):
                 f"{datetime.now()} [INFO] = Closing connection with database")
             session.close()
             raise Exception("Failed to bulk insert reviews")
+        session.close()
 
     except Exception as error:
         raise error
+
+
+def save_screenshot_page_source(screenshot, page_source, store_id, database):
+    Session = sessionmaker(bind=database)
+    session = Session()
+    print(f"{datetime.now()} [INFO] = Save screenshot")
+    try:
+        print(f"{datetime.now()} [INFO] = Connecting with database")
+        store = session.query(StoreModel).get(store_id)
+        store.screenshot = screenshot
+        store.page_source = page_source
+        session.commit()
+    except Exception as error:
+        print(f"{datetime.now()} [ERROR] Failed to save screenshot {error}")
+    session.close()
 
 
 def scrape_handler(event, context):
@@ -349,7 +383,7 @@ def scrape_handler(event, context):
 
         search_string = store.search_name
 
-        url = "https://www.google.com.br/"
+        url = "https://www.google.com/search?q="
 
         options = webdriver.ChromeOptions()
         options.binary_location = '/opt/chrome/chrome'
@@ -357,15 +391,19 @@ def scrape_handler(event, context):
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-gpu")
-        options.add_argument("--disable-dev-tools")
+        # options.add_argument("--disable-dev-tools")
         options.add_argument("--no-zygote")
         options.add_argument("--single-process")
         options.add_argument("--window-size=2560x1440")
         options.add_argument("--user-data-dir=/tmp/chrome-user-data")
         options.add_argument("--remote-debugging-port=9222")
+        options.add_experimental_option("prefs", dict({
+            "profile.default_content_settings.geolocation": 2
+        }))
+        options.add_argument('--deny-permission-prompts')
         options.headless = True
         selenium_options = {
-            'request_storage_base_dir': '/tmp',  # Use /tmp to store captured data
+            'request_storage_base_dir': '/tmp',
             'exclude_hosts': ''
         }
         service = Service(
@@ -377,21 +415,17 @@ def scrape_handler(event, context):
         driver = webdriver.Chrome(
             service=service, options=options, seleniumwire_options=selenium_options)
 
-        print(f"{datetime.now()} [INFO] = Loads google web site")
+        print(
+            f"{datetime.now()} [INFO] = Loads google web site searching for {search_string}")
 
-        driver.get(url)
+        driver.get(url + search_string)
 
-        search_input = driver.find_element(
-            by=By.XPATH, value='//textarea[@title="Pesquisar"]')
+        screenshot = driver.get_screenshot_as_base64()
 
-        search_input = WebDriverWait(driver, 30).until(expected_conditions.presence_of_element_located(
-            (By.XPATH, '//textarea[@title="Pesquisar"]')))
+        page_source = driver.page_source
 
-        print(f"{datetime.now()} [INFO] = Search for {search_string}")
-
-        search_input.send_keys(search_string)
-
-        search_input.submit()
+        save_screenshot_page_source(
+            screenshot, page_source, store_id, database)
 
         print(
             f"{datetime.now()} [INFO] = Clicking in button to see more reviews")
@@ -402,9 +436,9 @@ def scrape_handler(event, context):
         modal = WebDriverWait(driver, 30).until(expected_conditions.presence_of_element_located(
             (By.XPATH, '//div[@class="review-dialog-list"]')))
 
-        reviews = []
+        reviews = collect_comments_selenium(driver, store.id)
 
-        collect_comments_selenium(driver, reviews, store.id)
+        bulk_insert_reviews(reviews, database)
 
         try:
             print(
@@ -429,7 +463,7 @@ def scrape_handler(event, context):
                 print(
                     f"{datetime.now()} [INFO] = Filtering browser requests to find request with reviewSort param")
 
-                driver.wait_for_request(r'(.*)/reviewSort\?')
+                driver.wait_for_request(r'(.*)/reviewSort\?', timeout=60)
 
                 review_sort = list(
                     filter(lambda c: c.url.find("reviewSort?") != -1, driver.requests))
@@ -440,8 +474,7 @@ def scrape_handler(event, context):
 
                 review_sort_request = review_sort[0]
 
-                get_remain_comments(review_sort_request,
-                                    reviews, store_id)
+                get_remain_comments(review_sort_request, store_id, database)
 
             else:
                 print(f"{datetime.now()} [INFO] = Closing selenium webdriver")
@@ -456,8 +489,6 @@ def scrape_handler(event, context):
             driver.close()
         except:
             pass
-
-        bulk_insert_reviews(reviews, database)
 
         end_time = time()
 

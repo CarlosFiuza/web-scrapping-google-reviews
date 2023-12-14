@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Numeric
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Numeric, Text
 from sqlalchemy.orm import relationship, declarative_base, Session
 from sqlalchemy.sql import func
 from sqlalchemy.exc import SQLAlchemyError
@@ -29,6 +29,8 @@ class StoreModel(DbBaseModel):
     name = Column(String, nullable=False, unique=True)
     search_name = Column(String, nullable=False)
     review = relationship("ReviewModel", uselist=False, back_populates="store")
+    screenshot = Column(Text)
+    page_source = Column(Text)
 
 
 class ReviewModel(DbBaseModel):
