@@ -57,6 +57,7 @@ O projeto tem como objetivo extrair as avaliações criadas pelo clientes de loj
 
 - Solução não funciona quando executada no lambda AWS, devido ao fato da página WEB carregada ser diferente da página usada como referência para o scraping.
 - Dependência quase total do web-scraping, o que implica que alterações no layout do google irão tornar o programa obsoleto.
+- A cada execução do programa todas as avaliações extraídas são inseridos no banco, não existindo verificação para avaliação duplicada e atualização já existente. Para corrigir isso é necessário a criação de uma chave única para cada avaliação, que pode ser constituida da concatenação do nome do avaliados e do comentário realizado.
 
 ## Alternativas
 
